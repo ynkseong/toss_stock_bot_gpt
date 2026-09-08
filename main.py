@@ -1,16 +1,19 @@
-import time
 from token_manager import get_access_token
-from toss_api import get_stock_prices, parse_stock_data, STOCKS
+import time
+from toss_api import (
+    get_stock_prices,
+    parse_stock_data,
+    get_investor_trading,
+    parse_investor_trading,
+    STOCKS,
+)
 
+def display_stocks(stocks, previous_prices, investor_data):
 
-def display_stocks(stocks, previous_prices):
     print("\033[2J\033[H", end="")
-
-    print("╔══════════════════════════════════════════════════╗")
-    print("║             📊 TOSS STOCK MONITOR              ║")
-    print("╠══════════════════════════════════════════════════╣")
-    print("║ 종목          현재가          변화        변화율 ║")
-    print("╠══════════════════════════════════════════════════╣")
+    print("╔══════════════════════════════════════════════════════════════════════╗")
+    print("║ 종목코드        현재가          변화        변화율        종목명     ║")
+    print("╠═══════════════════════════════════════════════════════════════════════")
 
     for stock in stocks:
         current_price = stock.price
@@ -23,18 +26,41 @@ def display_stocks(stocks, previous_prices):
             change = current_price - previous_price
             change_rate = (change / previous_price) * 100
 
+        # 통화 표시
+        if stock.currency == "KRW":
+            price_text = f"KRW {current_price:,.0f}"
+            change_text = f"KRW {change:,.0f}"
+        else:
+            price_text = f"USD {current_price:,.2f}"
+            change_text = f"USD {change:,.2f}"
+
+        investor = investor_data.get(stock.symbol)
+
+        if investor:
+            individual = investor["individual"]
+            foreigner = investor["foreigner"]
+            institution = investor["institution"]
+
+            print(
+                f"║ {'':10}"
+                f"개인 {individual:+,}"
+                f"  외국인 {foreigner:+,}"
+                f"  기관 {institution:+,}"
+                f"{'':>20}"
+            )
+
         print(
-            f"║ {stock.name:<10}"
-            f"{current_price:>12,}원"
-            f"{change:>12,}원"
-            f"{change_rate:>8.2f}% ║"
+            f"║ {stock.symbol:<10}"
+            f"{price_text:>16}"
+            f"{change_text:>16}"
+            f"{change_rate:>10.2f}%"
+            f"    {stock.name:<20}"
         )
 
-    print("╚══════════════════════════════════════════════════╝")
+    print("╚══════════════════════════════════════════════════════════════════════")
     print()
     print("🔄 5초마다 자동 갱신됩니다.")
     print("🛑 종료하려면 Ctrl + C")
-
 
 def main():
     print("🚀 주식매매프로그램 시작")
@@ -56,13 +82,24 @@ def main():
             # 주가 조회
             stock_data = get_stock_prices(access_token, symbols)
 
+            investor_data = {}
+
+            for symbol in ["005930", "000660", "005380", "035420", "035720"]:
+                raw_data = get_investor_trading(access_token, symbol)
+
+                if raw_data is not None:
+                    parsed_data = parse_investor_trading(raw_data)
+
+                    if parsed_data is not None:
+                        investor_data[symbol] = parsed_data
+
             if stock_data is not None:
 
                 # StockData로 변환
                 stocks = parse_stock_data(stock_data)
 
                 # 화면 출력
-                display_stocks(stocks, previous_prices)
+                display_stocks(stocks, previous_prices, investor_data)
 
                 # 현재 가격을 다음 비교를 위해 저장
                 for stock in stocks:

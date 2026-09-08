@@ -9,12 +9,17 @@ BASE_URL = "https://openapi.tossinvest.com"
 # ==========================================
 
 STOCKS = {
-    "005930": "삼성전자",
-    "000660": "SK하이닉스",
-    "005380": "현대차",
+    "005930": "Samsung Electronics",
+    "000660": "SK Hynix",
+    "005380": "Hyundai Motor",
     "035420": "NAVER",
-    "035720": "카카오",
-}
+    "035720": "Kakao",
+    "NVDA": "NVIDIA",
+    "INTC": "Intel",
+    "SNDK": "SanDisk",
+    "MU": "Micron Tech.",
+    "AMD": "AMD",
+    }
 
 # ==========================================
 # 여러 종목 현재가 조회
@@ -41,6 +46,42 @@ def get_stock_prices(access_token, symbols):
 
     return response.json()
 
+def get_investor_trading(access_token, symbol):
+    url = f"{BASE_URL}/api/v1/stocks/{symbol}/investor-trading"
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+    }
+
+    response = requests.get(url, headers=headers)
+
+    if response.status_code != 200:
+        print(f"❌ {symbol} 투자자별 매매동향 조회 실패")
+        print("상태 코드:", response.status_code)
+        print(response.text)
+        return None
+
+    return response.json()
+
+def parse_investor_trading(investor_data):
+    if not investor_data:
+        return None
+
+    records = investor_data.get("result", {}).get("records", [])
+
+    if not records:
+        return None
+
+    latest = records[0]
+
+    return {
+        "date": latest["date"],
+        "individual": int(latest["individual"]["netBuyVolume"]),
+        "foreigner": int(latest["foreigner"]["netBuyVolume"]),
+        "institution": int(latest["institution"]["netBuyVolume"]),
+    }
+
 # ==========================================
 # API 데이터를 표준 데이터 구조로 변환
 # ==========================================
@@ -56,7 +97,7 @@ def parse_stock_data(stock_data):
         standard_data = StockData(
             symbol=symbol,
             name=STOCKS.get(symbol, symbol),
-            price=int(stock["lastPrice"]),
+            price=float(stock["lastPrice"]),
             currency=stock["currency"],
             timestamp=stock["timestamp"]
         )

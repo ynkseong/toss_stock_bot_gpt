@@ -5,6 +5,6 @@ class StockData:
 
     symbol: str
     name: str
-    price: int
+    price: float
     currency: str
     timestamp: str
