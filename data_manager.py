@@ -13,7 +13,7 @@ class DataManager:
             "sox": 180,
             "exchange_rate": 180,
             "market_indicators": 180,
-            "news": 300,
+            "news": 10,
             "interest_rate": 86400,
         }
 

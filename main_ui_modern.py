@@ -10,8 +10,7 @@ from token_manager import get_access_token
 from toss_api import get_stock_prices, parse_stock_data, STOCKS
 from market_indicators import get_market_indicators
 from data_manager import DataManager
-
-
+from news_collector import collect_news
 # ============================================================
 # 색상 테마
 # ============================================================
@@ -58,6 +57,7 @@ class TradingApp:
         self.previous_prices = {}
         self.price_history = defaultdict(lambda: deque(maxlen=60))
         self.selected_symbol = None
+        self.news_data = []
 
         # 국가 컬럼의 국기 아이콘을 장 상태에 따라 바꾸기 위해 미리 초기화해둡니다.
         self.kr_open = False
@@ -305,7 +305,7 @@ class TradingApp:
 
         tk.Label(
             right,
-            text="  🌎 글로벌 시장 지표",
+            text="  🌎 글로벌 시장 지표  •  GOLD: USD/oz",
             font=("Arial", 13, "bold"),
             fg=TEXT,
             bg=PANEL,
@@ -314,147 +314,45 @@ class TradingApp:
 
         market_frame = tk.Frame(right, bg=PANEL)
         market_frame.pack(fill="x", padx=14)
-
         self.market_labels = {}
+        market_columns = [["WTI", "GOLD", "Brent", "USD/KRW"], ["SOX", "NASDAQ", "S&P500", "DXY"]]
+        for col_index, names in enumerate(market_columns):
+            col_frame = tk.Frame(market_frame, bg=PANEL)
+            col_frame.pack(side="left", fill="both", expand=True, padx=(0, 4) if col_index == 0 else (4, 0))
+            for name in names:
+                row = tk.Frame(col_frame, bg=PANEL_2, highlightbackground=BORDER, highlightthickness=1)
+                row.pack(fill="x", pady=2)
+                name_label = tk.Label(row, text=name, font=("Arial", 9, "bold"), fg=TEXT, bg=PANEL_2, width=9, anchor="w")
+                name_label.pack(side="left", padx=8, pady=5)
+                value_label = tk.Label(row, text="데이터 확인 중...", font=("Consolas", 9), fg=MUTED, bg=PANEL_2, anchor="e")
+                value_label.pack(side="right", padx=8, pady=5)
+                self.market_labels[name] = value_label
 
-        market_names = [
-            "SOX",
-            "NASDAQ",
-            "S&P500",
-            "DXY",
-            "WTI",
-            "Brent",
-            "USD/KRW",
-        ]
+        # ====================================================
+        # 오른쪽 - 최신 뉴스
+        # ====================================================
 
-        for name in market_names:
-            row = tk.Frame(
-                market_frame,
-                bg=PANEL_2,
-                highlightbackground=BORDER,
-                highlightthickness=1,
-            )
-            row.pack(fill="x", pady=3)
+        tk.Label(right, text="  📰 최신 시장 뉴스", font=("Arial", 13, "bold"), fg=TEXT, bg=PANEL, anchor="w").pack(fill="x", padx=10, pady=(12, 6))
 
-            name_label = tk.Label(
-                row,
-                text=name,
-                font=("Arial", 10, "bold"),
-                fg=TEXT,
-                bg=PANEL_2,
-                width=11,
-                anchor="w",
-            )
-            name_label.pack(side="left", padx=12, pady=8)
+        news_frame = tk.Frame(right, bg=PANEL_2, highlightbackground=BORDER, highlightthickness=1)
+        news_frame.pack(fill="x", padx=14, pady=(0, 10))
 
-            value_label = tk.Label(
-                row,
-                text="데이터 확인 중...",
-                font=("Consolas", 10),
-                fg=MUTED,
-                bg=PANEL_2,
-                anchor="e",
-            )
-            value_label.pack(side="right", padx=12, pady=8)
+        news_columns = ("time", "source", "title", "symbols")
+        self.news_tree = ttk.Treeview(news_frame, columns=news_columns, show="headings", height=7, style="Modern.Treeview")
 
-            self.market_labels[name] = value_label
-
-        tk.Label(
-            right,
-            text="  📰 뉴스 정보  •  최신 5건",
-            font=("Arial", 13, "bold"),
-            fg=TEXT,
-            bg=PANEL,
-            anchor="w",
-        ).pack(fill="x", padx=10, pady=(18, 7))
-
-        news_frame = tk.Frame(right, bg=PANEL)
-        news_frame.pack(fill="x", padx=14, pady=(0, 4))
-
-        news_columns = ("no", "source", "speaker", "keyword", "embargo")
-
-        self.news_tree = ttk.Treeview(
-            news_frame,
-            columns=news_columns,
-            show="headings",
-            height=5,
-            style="Modern.Treeview",
-            selectmode="browse",
-        )
-
-        news_headers = {
-            "no": "#",
-            "source": "원천",
-            "speaker": "발언자/발언기관",
-            "keyword": "주요키워드",
-            "embargo": "엠바고시간",
-        }
-
-        news_widths = {
-            "no": 28,
-            "source": 90,
-            "speaker": 130,
-            "keyword": 120,
-            "embargo": 90,
-        }
+        news_headers = {"time": "시간", "source": "출처", "title": "뉴스", "symbols": "관련종목"}
+        news_widths = {"time": 65, "source": 90, "title": 500, "symbols": 105}
 
         for col in news_columns:
             self.news_tree.heading(col, text=news_headers[col])
-            self.news_tree.column(
-                col, width=news_widths[col], anchor="center", stretch=True
-            )
+            self.news_tree.column(col, width=news_widths[col], anchor="w", stretch=True)
 
-        # 4)에서 다루기로 한 "중요 내용 빨간 굵게" 표시를 위한 태그를 미리 준비해둡니다.
-        # 지금은 사용하지 않고, 실제 뉴스 연동 시 중요 행에 tags=("important",)만 붙이면 됩니다.
-        self.news_tree.tag_configure(
-            "important", foreground=RED, font=("Arial", 9, "bold")
-        )
+        news_scrollbar = ttk.Scrollbar(news_frame, orient="vertical", command=self.news_tree.yview)
+        self.news_tree.configure(yscrollcommand=news_scrollbar.set)
+        self.news_tree.pack(side="left", fill="x", expand=True)
+        news_scrollbar.pack(side="right", fill="y")
 
-        self.news_tree.pack(fill="x")
-
-        # 실제 뉴스 연동 전 placeholder 5행
-        for i in range(1, 6):
-            self.news_tree.insert("", "end", values=(i, "-", "-", "-", "-"))
-
-        # ====================================================
-        # 오른쪽 - 조건 판단
-        # ====================================================
-
-        tk.Label(
-            right,
-            text="  🧠 조건 판단 현황",
-            font=("Arial", 13, "bold"),
-            fg=TEXT,
-            bg=PANEL,
-            anchor="w",
-        ).pack(fill="x", padx=10, pady=(18, 7))
-
-        condition_frame = tk.Frame(right, bg=PANEL)
-        condition_frame.pack(fill="both", expand=True, padx=14)
-
-        condition_columns = ("condition", "value", "status", "score")
-
-        self.condition_tree = ttk.Treeview(
-            condition_frame,
-            columns=condition_columns,
-            show="headings",
-            height=8,
-            style="Modern.Treeview",
-        )
-
-        condition_headers = {
-            "condition": "조건",
-            "value": "현재값",
-            "status": "판단",
-            "score": "점수",
-        }
-
-        for col in condition_columns:
-            self.condition_tree.heading(col, text=condition_headers[col])
-            self.condition_tree.column(col, anchor="center", stretch=True)
-
-        self.condition_tree.pack(fill="both", expand=True)
-
+        self.news_tree.bind("<Double-1>", self.open_news_link)
         # ====================================================
         # 오른쪽 - 종합 판단 카드
         # ====================================================
@@ -555,7 +453,7 @@ class TradingApp:
             background=STOCK_BG,
             fieldbackground=STOCK_BG,
             foreground=STOCK_TEXT,
-            rowheight=32,
+            rowheight=24,
             borderwidth=0,
             font=("Arial", 9),
         )
@@ -708,6 +606,7 @@ class TradingApp:
     def manual_refresh(self):
         threading.Thread(target=self.fetch_stock_prices, daemon=True).start()
         threading.Thread(target=self.fetch_market_indicators, daemon=True).start()
+        threading.Thread(target=self.fetch_news, daemon=True).start()
         self.status_label.config(text="수동 새로고침 요청")
 
     # ========================================================
@@ -729,6 +628,9 @@ class TradingApp:
                     daemon=True,
                 ).start()
                 self.data_manager.mark_updated("market_indicators")
+            if self.data_manager.should_update("news"):
+                threading.Thread(target=self.fetch_news, daemon=True).start()
+                self.data_manager.mark_updated("news")
 
         self.root.after(500, self.update_loop)
 
@@ -766,7 +668,18 @@ class TradingApp:
             self.render_market_indicators,
             market_data,
         )
+    # ========================================================
+    # 뉴스 조회
+    # ========================================================
 
+    def fetch_news(self):
+        try:
+            import contextlib, io
+            with contextlib.redirect_stdout(io.StringIO()):
+                news_data = collect_news(limit_per_query=5)
+            self.root.after(0, self.render_news, news_data)
+        except Exception as e:
+            print("❌ 뉴스 조회 실패:", e)
     # ========================================================
     # 주가 화면 출력
     # ========================================================
@@ -1028,49 +941,37 @@ class TradingApp:
                     text=text,
                     fg=text_color,
                 )
-
-    # ========================================================
-    # 뉴스 정보 출력
-    # ========================================================
-
-    def render_news(self, news_items):
-        """
-        news_items: 최신순으로 정렬된 뉴스 리스트.
-        각 원소는 dict 형태를 기대합니다:
-            {
-                "source": "원천",
-                "speaker": "발언자/발언기관",
-                "keyword": "주요키워드",
-                "embargo": "엠바고시간",
-                "important": False,   # True면 4)에서 다룰 빨간 굵게 표시에 사용
-            }
-        아직 실제 뉴스 소스가 연결되어 있지 않아 이 메서드는 준비만 해둔 상태이며,
-        news_manager 같은 모듈이 생기면 fetch_market_indicators와 같은 패턴으로
-        스레드에서 호출 후 self.root.after(0, self.render_news, news_list) 로 연결하면 됩니다.
-        """
+    def render_news(self, news_data):
+        if not news_data:
+            return
+        self.news_data = sorted(news_data, key=lambda x: x.get("published_at", ""), reverse=True)[:7]
         for row in self.news_tree.get_children():
             self.news_tree.delete(row)
+        for i, article in enumerate(self.news_data):
+            published_at = article.get("published_at", "")
+            time_text = published_at[11:16] if len(published_at) >= 16 else published_at
+            source = article.get("source", "") or "-"
+            title = article.get("title", "") or "-"
+            symbols = ", ".join(article.get("related_symbols", [])) or "-"
+            self.news_tree.insert("", "end", iid=str(i), values=(time_text, source, title, symbols))
+        self.status_label.config(text=f"뉴스 업데이트 완료  •  {time.strftime('%H:%M:%S')}")
 
-        items = news_items[:5] if news_items else []
+    def open_news_link(self, event=None):
+        import webbrowser
 
-        for i in range(1, 6):
-            if i <= len(items):
-                item = items[i - 1]
-                tags = ("important",) if item.get("important") else ()
-                self.news_tree.insert(
-                    "", "end",
-                    values=(
-                        i,
-                        item.get("source", "-"),
-                        item.get("speaker", "-"),
-                        item.get("keyword", "-"),
-                        item.get("embargo", "-"),
-                    ),
-                    tags=tags,
-                )
-            else:
-                self.news_tree.insert("", "end", values=(i, "-", "-", "-", "-"))
+        selected = self.news_tree.selection()
 
+        if not selected:
+            return
+
+        try:
+            index = int(selected[0])
+        except (TypeError, ValueError):
+            return
+        if 0 <= index < len(self.news_data):
+            link = self.news_data[index].get("link")
+            if link:
+                webbrowser.open(link)
 
 if __name__ == "__main__":
     root = tk.Tk()

@@ -10,10 +10,11 @@ MARKET_INDICATORS = {
     "NASDAQ": "^IXIC",
     "S&P500": "^GSPC",
 
-    # TradingView 기준: TVC:DXY
+    # TradingView 기준: TVC:DXY / yfinance 조회: DX-Y.NYB
     "DXY": "DX-Y.NYB",
 
     "WTI": "CL=F",
+    "GOLD": "GC=F",
     "Brent": "BZ=F",
     "USD/KRW": "USDKRW=X",
 }
