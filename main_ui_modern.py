@@ -11,6 +11,7 @@ from toss_api import get_stock_prices, parse_stock_data, STOCKS
 from market_indicators import get_market_indicators
 from data_manager import DataManager
 from news_collector import collect_news
+from market_heatmap import get_heatmap_data
 # ============================================================
 # 색상 테마
 # ============================================================
@@ -58,6 +59,7 @@ class TradingApp:
         self.price_history = defaultdict(lambda: deque(maxlen=60))
         self.selected_symbol = None
         self.news_data = []
+        self.news_fetch_running = False
 
         # 국가 컬럼의 국기 아이콘을 장 상태에 따라 바꾸기 위해 미리 초기화해둡니다.
         self.kr_open = False
@@ -150,12 +152,18 @@ class TradingApp:
         # 메인 영역
         # ====================================================
 
-        main = tk.Frame(root, bg=BG)
+        main = ttk.Notebook(root, style="Modern.TNotebook")
         main.pack(fill="both", expand=True, padx=22, pady=8)
 
+        monitor_tab = tk.Frame(main, bg=BG)
+        heatmap_tab = tk.Frame(main, bg=BG)
+        main.add(monitor_tab, text="  📈 Market Monitor  ")
+        main.add(heatmap_tab, text="  🔥 시총 Heatmap  ")
+
+        # 기존 Market Monitor 화면
         # 왼쪽 68%, 오른쪽 32%
         left = tk.Frame(
-            main,
+            monitor_tab,
             bg=PANEL,
             highlightbackground=BORDER,
             highlightthickness=1,
@@ -170,7 +178,7 @@ class TradingApp:
         )
 
         right = tk.Frame(
-            main,
+            monitor_tab,
             bg=PANEL,
             highlightbackground=BORDER,
             highlightthickness=1,
@@ -305,54 +313,154 @@ class TradingApp:
 
         tk.Label(
             right,
-            text="  🌎 글로벌 시장 지표  •  GOLD: USD/oz",
+            text="  🌎 글로벌 시장 지표",
             font=("Arial", 13, "bold"),
             fg=TEXT,
             bg=PANEL,
             anchor="w",
         ).pack(fill="x", padx=10, pady=(12, 7))
 
+        # 주요 지표 2열 표시
         market_frame = tk.Frame(right, bg=PANEL)
         market_frame.pack(fill="x", padx=14)
+
         self.market_labels = {}
-        market_columns = [["WTI", "GOLD", "Brent", "USD/KRW"], ["SOX", "NASDAQ", "S&P500", "DXY"]]
-        for col_index, names in enumerate(market_columns):
-            col_frame = tk.Frame(market_frame, bg=PANEL)
-            col_frame.pack(side="left", fill="both", expand=True, padx=(0, 4) if col_index == 0 else (4, 0))
-            for name in names:
-                row = tk.Frame(col_frame, bg=PANEL_2, highlightbackground=BORDER, highlightthickness=1)
-                row.pack(fill="x", pady=2)
-                name_label = tk.Label(row, text=name, font=("Arial", 9, "bold"), fg=TEXT, bg=PANEL_2, width=9, anchor="w")
-                name_label.pack(side="left", padx=8, pady=5)
-                value_label = tk.Label(row, text="데이터 확인 중...", font=("Consolas", 9), fg=MUTED, bg=PANEL_2, anchor="e")
-                value_label.pack(side="right", padx=8, pady=5)
-                self.market_labels[name] = value_label
 
-        # ====================================================
-        # 오른쪽 - 최신 뉴스
-        # ====================================================
+        market_names = [
+            "SOX", "NASDAQ",
+            "S&P500", "DXY",
+            "WTI", "GOLD",
+            "Brent", "USD/KRW",
+        ]
 
-        tk.Label(right, text="  📰 최신 시장 뉴스", font=("Arial", 13, "bold"), fg=TEXT, bg=PANEL, anchor="w").pack(fill="x", padx=10, pady=(12, 6))
+        for i, name in enumerate(market_names):
+            row = i // 2
+            col = i % 2
 
-        news_frame = tk.Frame(right, bg=PANEL_2, highlightbackground=BORDER, highlightthickness=1)
-        news_frame.pack(fill="x", padx=14, pady=(0, 10))
+            card = tk.Frame(
+                market_frame,
+                bg=PANEL_2,
+                highlightbackground=BORDER,
+                highlightthickness=1,
+            )
+            card.grid(
+                row=row, column=col,
+                sticky="ew",
+                padx=(0, 5) if col == 0 else (5, 0),
+                pady=3,
+            )
+
+            market_frame.grid_columnconfigure(0, weight=1, uniform="market")
+            market_frame.grid_columnconfigure(1, weight=1, uniform="market")
+
+            name_label = tk.Label(
+                card,
+                text=name,
+                font=("Arial", 10, "bold"),
+                fg=TEXT,
+                bg=PANEL_2,
+                anchor="w",
+            )
+            name_label.pack(side="left", padx=10, pady=8)
+
+            value_label = tk.Label(
+                card,
+                text="데이터 확인 중...",
+                font=("Consolas", 10),
+                fg=MUTED,
+                bg=PANEL_2,
+                anchor="e",
+            )
+            value_label.pack(side="right", padx=10, pady=8)
+
+            self.market_labels[name] = value_label
+
+        tk.Label(
+            right,
+            text="  📰 뉴스 정보  •  최신 5건",
+            font=("Arial", 13, "bold"),
+            fg=TEXT,
+            bg=PANEL,
+            anchor="w",
+        ).pack(fill="x", padx=10, pady=(18, 7))
+
+        news_frame = tk.Frame(right, bg=PANEL)
+        news_frame.pack(fill="x", padx=14, pady=(0, 4))
 
         news_columns = ("time", "source", "title", "symbols")
-        self.news_tree = ttk.Treeview(news_frame, columns=news_columns, show="headings", height=7, style="Modern.Treeview")
 
-        news_headers = {"time": "시간", "source": "출처", "title": "뉴스", "symbols": "관련종목"}
-        news_widths = {"time": 65, "source": 90, "title": 500, "symbols": 105}
+        self.news_tree = ttk.Treeview(
+            news_frame,
+            columns=news_columns,
+            show="headings",
+            height=5,
+            style="Modern.Treeview",
+            selectmode="browse",
+        )
+
+        news_headers = {
+            "time": "시간(KST)",
+            "source": "원천",
+            "title": "뉴스 제목",
+            "symbols": "관련종목",
+        }
+
+        news_widths = {
+            "time": 55,
+            "source": 105,
+            "title": 330,
+            "symbols": 90,
+        }
 
         for col in news_columns:
             self.news_tree.heading(col, text=news_headers[col])
-            self.news_tree.column(col, width=news_widths[col], anchor="w", stretch=True)
+            self.news_tree.column(col, width=news_widths[col], anchor="center" if col != "title" else "w", stretch=True)
 
-        news_scrollbar = ttk.Scrollbar(news_frame, orient="vertical", command=self.news_tree.yview)
-        self.news_tree.configure(yscrollcommand=news_scrollbar.set)
-        self.news_tree.pack(side="left", fill="x", expand=True)
-        news_scrollbar.pack(side="right", fill="y")
-
+        self.news_tree.tag_configure(
+            "important", foreground=RED, font=("Arial", 9, "bold")
+        )
         self.news_tree.bind("<Double-1>", self.open_news_link)
+        self.news_tree.pack(fill="x")
+
+
+        # ====================================================
+        # 오른쪽 - 조건 판단
+        # ====================================================
+
+        tk.Label(
+            right,
+            text="  🧠 조건 판단 현황",
+            font=("Arial", 13, "bold"),
+            fg=TEXT,
+            bg=PANEL,
+            anchor="w",
+        ).pack(fill="x", padx=10, pady=(18, 7))
+
+        condition_frame = tk.Frame(right, bg=PANEL)
+        condition_frame.pack(fill="both", expand=True, padx=14)
+
+        condition_columns = ("condition", "value", "status", "score")
+
+        self.condition_tree = ttk.Treeview(
+            condition_frame,
+            columns=condition_columns,
+            show="headings",
+            height=8,
+            style="Modern.Treeview",
+        )
+
+        condition_headers = {
+            "condition": "조건",
+            "value": "현재값",
+            "status": "판단",
+            "score": "점수",
+        }
+
+        for col in condition_columns:
+            self.condition_tree.heading(col, text=condition_headers[col])
+            self.condition_tree.column(col, anchor="center", stretch=True)
+
+        self.condition_tree.pack(fill="both", expand=True)
         # ====================================================
         # 오른쪽 - 종합 판단 카드
         # ====================================================
@@ -382,6 +490,75 @@ class TradingApp:
             bg=DEEP_BG,
         )
         self.final_decision_label.pack(pady=(2, 13))
+
+        # ====================================================
+        # 두 번째 Sheet - 시가총액 Heatmap
+        # ====================================================
+        heatmap_outer = tk.Frame(heatmap_tab, bg=BG)
+        heatmap_outer.pack(fill="both", expand=True, padx=8, pady=8)
+
+        heatmap_header = tk.Frame(heatmap_outer, bg=BG)
+        heatmap_header.pack(fill="x", padx=8, pady=(4, 8))
+
+        tk.Label(
+            heatmap_header,
+            text="🔥 시가총액 Heatmap",
+            font=("Arial", 16, "bold"),
+            fg=TEXT, bg=BG, anchor="w",
+        ).pack(side="left")
+
+        self.heatmap_status = tk.Label(
+            heatmap_header,
+            text="시장가치 면적  •  등락률 색상",
+            font=("Arial", 9),
+            fg=MUTED, bg=BG,
+        )
+        self.heatmap_status.pack(side="left", padx=14)
+
+        self.heatmap_refresh_button = tk.Button(
+            heatmap_header,
+            text="⟳  Heatmap 새로고침",
+            command=self.manual_heatmap_refresh,
+            font=("Arial", 9, "bold"),
+            fg=WHITE, bg=PANEL_2, activebackground=BORDER, activeforeground=WHITE,
+            relief="flat", bd=0, padx=14, pady=6, cursor="hand2",
+        )
+        self.heatmap_refresh_button.pack(side="right")
+
+        heatmap_canvas_frame = tk.Frame(heatmap_outer, bg=BG)
+        heatmap_canvas_frame.pack(fill="both", expand=True)
+
+        self.heatmap_canvas = tk.Canvas(
+            heatmap_canvas_frame, bg=BG, highlightthickness=0, bd=0,
+        )
+        heatmap_scroll = ttk.Scrollbar(
+            heatmap_canvas_frame, orient="vertical", command=self.heatmap_canvas.yview
+        )
+        self.heatmap_canvas.configure(yscrollcommand=heatmap_scroll.set)
+        self.heatmap_canvas.pack(side="left", fill="both", expand=True)
+        heatmap_scroll.pack(side="right", fill="y")
+
+        self.heatmap_content = tk.Frame(self.heatmap_canvas, bg=BG)
+        self.heatmap_window = self.heatmap_canvas.create_window(
+            (0, 0), window=self.heatmap_content, anchor="nw"
+        )
+        self.heatmap_content.bind(
+            "<Configure>",
+            lambda e: self.heatmap_canvas.configure(scrollregion=self.heatmap_canvas.bbox("all"))
+        )
+        self.heatmap_canvas.bind(
+            "<Configure>",
+            lambda e: self.heatmap_canvas.itemconfigure(self.heatmap_window, width=e.width)
+        )
+        self.heatmap_canvas.bind_all("<MouseWheel>", self._on_heatmap_mousewheel, add="+")
+        # 중요: heatmap_content의 Configure에서 _draw_heatmap()을 호출하면
+        # _draw_heatmap()이 자식 카드들을 destroy하면서 다시 Configure 이벤트가 발생해
+        # 무한 재귀가 발생합니다. Heatmap은 데이터 갱신 시에만 직접 그립니다.
+
+        self.heatmap_cards = {}
+        self.heatmap_refresh_running = False
+        self.root.after(300, lambda: threading.Thread(target=self._load_heatmap_async, daemon=True).start())
+        self.root.after(10000, self._heatmap_auto_refresh)
 
         # ====================================================
         # 하단 상태바
@@ -449,11 +626,30 @@ class TradingApp:
         style.theme_use("clam")
 
         style.configure(
+            "Modern.TNotebook",
+            background=BG,
+            borderwidth=0,
+            tabmargins=(0, 0, 0, 0),
+        )
+        style.configure(
+            "Modern.TNotebook.Tab",
+            background=PANEL_2,
+            foreground=MUTED,
+            padding=(18, 8),
+            font=("Arial", 9, "bold"),
+        )
+        style.map(
+            "Modern.TNotebook.Tab",
+            background=[("selected", PANEL)],
+            foreground=[("selected", TEXT)],
+        )
+
+        style.configure(
             "Modern.Treeview",
             background=STOCK_BG,
             fieldbackground=STOCK_BG,
             foreground=STOCK_TEXT,
-            rowheight=24,
+            rowheight=32,
             borderwidth=0,
             font=("Arial", 9),
         )
@@ -572,6 +768,190 @@ class TradingApp:
         return img
 
     # ========================================================
+    # 시총 Heatmap
+    # ========================================================
+
+    def manual_heatmap_refresh(self):
+        if self.heatmap_refresh_running:
+            return
+        self.heatmap_status.config(text="시총 데이터 조회 중...")
+        self.heatmap_refresh_running = True
+        threading.Thread(target=self._load_heatmap_async, args=(False,), daemon=True).start()
+
+    def _heatmap_auto_refresh(self):
+        # 자동갱신 ON일 때만 10초마다 최신 시총/등락률을 다시 조회합니다.
+        if getattr(self, "auto_refresh", True) and not self.heatmap_refresh_running:
+            self.heatmap_refresh_running = True
+            threading.Thread(target=self._load_heatmap_async, args=(False,), daemon=True).start()
+        self.root.after(10000, self._heatmap_auto_refresh)
+
+    def _load_heatmap_async(self, force=False):
+        try:
+            data = get_heatmap_data(force=force)
+            self.root.after(0, self.render_heatmap, data)
+        except Exception as e:
+            self.root.after(0, self._heatmap_load_failed, e)
+
+    def _heatmap_load_failed(self, error):
+        self.heatmap_refresh_running = False
+        self.heatmap_status.config(text=f"❌ Heatmap 조회 실패: {error}")
+
+    def render_heatmap(self, data):
+        self.heatmap_refresh_running = False
+        if not data:
+            self.heatmap_status.config(text="⚠️ 새 데이터 조회 실패  •  마지막 정상 데이터 유지  •  10초 화면갱신")
+            return
+        self.heatmap_data = data
+        self._draw_heatmap()
+        total = sum(len(v) for v in self.heatmap_data.values())
+        self.heatmap_status.config(text=f"{total}종목  •  시총 면적  •  등락률 색상  •  화면 10초 / 데이터 10초")
+
+    def _on_heatmap_mousewheel(self, event):
+        try:
+            if self.heatmap_canvas.winfo_ismapped():
+                self.heatmap_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            pass
+
+    def _heatmap_color(self, change_rate):
+        # 기존 AMS 테마: 상승=RED, 하락=BLUE. 변동폭이 클수록 진하게.
+        x = max(-6.0, min(6.0, float(change_rate))) / 6.0
+        if x > 0:
+            alpha = 0.35 + 0.55 * abs(x)
+            return self._mix_color("#17202a", RED, alpha)
+        if x < 0:
+            alpha = 0.35 + 0.55 * abs(x)
+            return self._mix_color("#17202a", BLUE, alpha)
+        return "#17202a"
+
+    def _mix_color(self, base, target, alpha):
+        def rgb(h):
+            h = h.lstrip("#")
+            return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+        b, t = rgb(base), rgb(target)
+        c = tuple(round(b[i] + (t[i] - b[i]) * alpha) for i in range(3))
+        return "#" + "".join(f"{v:02x}" for v in c)
+
+    def _draw_category_heatmap(self, parent, category, items):
+        category_labels = {
+            "AI": "Artificial Intelligent Technology",
+            "반도체": "Semiconductor",
+            "소비재": "Consumer Goods",
+            "통신": "Communication",
+            "우주/방산": "Aerospace and Defense",
+            "헬스": "Health",
+            "바이오/건강": "Bio-technology",
+            "금융": "Finance",
+        }
+        display_category = category_labels.get(category, category)
+
+        card = tk.Frame(parent, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
+        card.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+
+        title = tk.Frame(card, bg=PANEL)
+        title.pack(fill="x", padx=10, pady=(8, 4))
+        tk.Label(title, text=display_category, font=("Arial", 12, "bold"), fg=TEXT, bg=PANEL).pack(side="left")
+        tk.Label(title, text=f"{len(items)}종목", font=("Arial", 8), fg=MUTED, bg=PANEL).pack(side="right")
+
+        canvas = tk.Canvas(card, bg=PANEL, highlightthickness=0, height=235)
+        canvas.pack(fill="both", expand=True, padx=7, pady=(0, 7))
+        canvas.bind("<Configure>", lambda e, c=canvas, d=items: self._paint_heatmap_canvas(c, d))
+
+        self.heatmap_cards[category] = (card, canvas, items)
+        self._paint_heatmap_canvas(canvas, items)
+
+    def _paint_heatmap_canvas(self, canvas, items):
+        canvas.delete("all")
+        if not items:
+            canvas.create_text(120, 100, text="데이터 없음", fill=MUTED, font=("Arial", 10))
+            return
+
+        width = max(canvas.winfo_width(), 300)
+        height = max(canvas.winfo_height(), 220)
+        gap = 2
+
+        def treemap(data, x, y, w, h, vertical=True):
+            if not data or w <= 1 or h <= 1:
+                return []
+            if len(data) == 1:
+                return [(data[0], x, y, w, h)]
+            total = sum(max(1.0, d["market_cap"]) for d in data)
+            target = total / 2
+            acc = 0.0
+            split = 1
+            for i, d in enumerate(data):
+                cap = max(1.0, d["market_cap"])
+                if i > 0 and abs((acc + cap) - target) > abs(acc - target):
+                    split = i
+                    break
+                acc += cap
+                split = i + 1
+            left, right = data[:split], data[split:]
+            left_sum = sum(max(1.0, d["market_cap"]) for d in left)
+            ratio = left_sum / total if total else 0.5
+            if vertical:
+                w1 = w * ratio
+                return treemap(left, x, y, w1, h, not vertical) + treemap(right, x+w1, y, w-w1, h, not vertical)
+            h1 = h * ratio
+            return treemap(left, x, y, w, h1, not vertical) + treemap(right, x, y+h1, w, h-h1, not vertical)
+
+        for item, x0, y0, w, h in treemap(items, 0, 0, width, height, width >= height):
+            x1, y1 = x0 + w, y0 + h
+            x0 += gap; y0 += gap; x1 -= gap; y1 -= gap
+            if x1 <= x0 or y1 <= y0:
+                continue
+            canvas.create_rectangle(
+                x0, y0, x1, y1, fill=self._heatmap_color(item["change_rate"]),
+                outline=BORDER, width=1, tags=(item["ticker"],)
+            )
+            cap = item["market_cap"]
+            cap_text = f"${cap/1e12:.1f}T" if cap >= 1e12 else f"${cap/1e9:.0f}B"
+            label = item["label"][:18]
+            area = (x1-x0) * (y1-y0)
+            if area > 5500:
+                canvas.create_text((x0+x1)/2, (y0+y1)/2-8, text=label, fill=WHITE, font=("Arial", 9, "bold"))
+                canvas.create_text((x0+x1)/2, (y0+y1)/2+9, text=f"{item['change_rate']:+.2f}%  {cap_text}", fill=WHITE, font=("Consolas", 7))
+            elif area > 2200:
+                canvas.create_text((x0+x1)/2, (y0+y1)/2, text=f"{item['ticker'].replace('.KS','')} {item['change_rate']:+.1f}%", fill=WHITE, font=("Arial", 7, "bold"))
+
+        # 마우스를 올리면 종목 정보를 상태표시로 보여줍니다.
+        def on_motion(event):
+            hit = canvas.find_closest(event.x, event.y)
+            if hit:
+                tags = canvas.gettags(hit[0])
+                if tags and tags[0] in {x["ticker"] for x in items}:
+                    found = next((x for x in items if x["ticker"] == tags[0]), None)
+                    if found:
+                        cap = found["market_cap"]
+                        cap_text = f"${cap/1e12:.2f}T" if cap >= 1e12 else f"${cap/1e9:.1f}B"
+                        self.heatmap_status.config(text=f"{found['label']}  •  시총 {cap_text}  •  {found['change_rate']:+.2f}%")
+        canvas.bind("<Motion>", on_motion)
+
+    def _draw_heatmap(self):
+        if not hasattr(self, "heatmap_content"):
+            return
+        for child in self.heatmap_content.winfo_children():
+            child.destroy()
+        self.heatmap_cards = {}
+
+        categories = [
+            "AI", "반도체", "소비재", "통신",
+            "우주/방산", "헬스", "바이오/건강", "금융",
+        ]
+        for idx, category in enumerate(categories):
+            items = self.heatmap_data.get(category, [])
+            row = idx // 2
+            col = idx % 2
+            # grid가 pack과 섞이지 않도록 별도 row frame
+            if col == 0:
+                row_frame = tk.Frame(self.heatmap_content, bg=BG)
+                row_frame.pack(fill="x", expand=True)
+            self._draw_category_heatmap(row_frame, category, items)
+
+        self.heatmap_content.update_idletasks()
+        self.heatmap_canvas.configure(scrollregion=self.heatmap_canvas.bbox("all"))
+
+    # ========================================================
     # 시계
     # ========================================================
 
@@ -580,6 +960,7 @@ class TradingApp:
         if hasattr(self, "kr_status_label"):
             self.update_market_status_labels()
         self.root.after(1000, self.update_clock)
+        self.root.after(1500, lambda: threading.Thread(target=self.fetch_news, daemon=True).start())
 
     # ========================================================
     # 자동 갱신 ON/OFF
@@ -673,13 +1054,34 @@ class TradingApp:
     # ========================================================
 
     def fetch_news(self):
+        if self.news_fetch_running:
+            return
+
+        self.news_fetch_running = True
         try:
-            import contextlib, io
+            import contextlib
+            import io
+
             with contextlib.redirect_stdout(io.StringIO()):
                 news_data = collect_news(limit_per_query=5)
+
             self.root.after(0, self.render_news, news_data)
+
+            # 0건이면 30초 후 한 번 더 자동 재시도
+            if not news_data:
+                self.root.after(30000, lambda: threading.Thread(
+                    target=self.fetch_news, daemon=True
+                ).start())
+
         except Exception as e:
-            print("❌ 뉴스 조회 실패:", e)
+            self.root.after(0, self.status_label.config,
+                             {"text": f"❌ 뉴스 조회 실패: {e}"})
+            self.root.after(30000, lambda: threading.Thread(
+                target=self.fetch_news, daemon=True
+            ).start())
+        finally:
+            self.news_fetch_running = False
+
     # ========================================================
     # 주가 화면 출력
     # ========================================================
@@ -943,18 +1345,26 @@ class TradingApp:
                 )
     def render_news(self, news_data):
         if not news_data:
+            self.status_label.config(text="⚠️ 뉴스 조회 결과 0건 • 30초 후 자동 재시도")
             return
-        self.news_data = sorted(news_data, key=lambda x: x.get("published_at", ""), reverse=True)[:7]
+
+        self.news_data = news_data
         for row in self.news_tree.get_children():
             self.news_tree.delete(row)
-        for i, article in enumerate(self.news_data):
+
+        for article in news_data[:5]:
             published_at = article.get("published_at", "")
             time_text = published_at[11:16] if len(published_at) >= 16 else published_at
-            source = article.get("source", "") or "-"
-            title = article.get("title", "") or "-"
+            source = article.get("source", "")
+            title = article.get("title", "")
             symbols = ", ".join(article.get("related_symbols", [])) or "-"
-            self.news_tree.insert("", "end", iid=str(i), values=(time_text, source, title, symbols))
-        self.status_label.config(text=f"뉴스 업데이트 완료  •  {time.strftime('%H:%M:%S')}")
+            self.news_tree.insert("", "end", values=(time_text, source, title, symbols))
+
+        self.status_label.config(text=f"뉴스 업데이트 완료 • {min(len(news_data), 5)}건 • {time.strftime('%H:%M:%S')}")
+
+    # ========================================================
+    # 뉴스 정보 출력
+    # ========================================================
 
     def open_news_link(self, event=None):
         import webbrowser
@@ -964,12 +1374,11 @@ class TradingApp:
         if not selected:
             return
 
-        try:
-            index = int(selected[0])
-        except (TypeError, ValueError):
-            return
+        index = self.news_tree.index(selected[0])
+
         if 0 <= index < len(self.news_data):
             link = self.news_data[index].get("link")
+
             if link:
                 webbrowser.open(link)
 

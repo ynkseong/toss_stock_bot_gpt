@@ -2,6 +2,8 @@ import requests
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 from email.utils import parsedate_to_datetime
+from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # ============================================================
@@ -43,7 +45,7 @@ def get_google_news(query, limit=10):
         response = requests.get(
             url,
             headers=headers,
-            timeout=10,
+            timeout=12,
         )
 
         if response.status_code != 200:
@@ -65,6 +67,8 @@ def get_google_news(query, limit=10):
             if pub_date:
                 try:
                     dt = parsedate_to_datetime(pub_date)
+                    # Google News RSS의 원본 timezone을 한국시간(KST, UTC+9)으로 통일
+                    dt = dt.astimezone(ZoneInfo("Asia/Seoul"))
                     published_at = dt.strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
                     pass
@@ -172,103 +176,45 @@ def find_related_symbols(article):
 
     return related_symbols
 
-KEYWORD_GROUPS = {
-    "AI": [
-        "AI",
-        "artificial intelligence",
-        "인공지능",
-    ],
-    "반도체": [
-        "semiconductor",
-        "chip",
-        "chips",
-        "반도체",
-    ],
-    "GPU": [
-        "GPU",
-        "graphics processor",
-    ],
-    "HBM": [
-        "HBM",
-        "high bandwidth memory",
-    ],
-    "데이터센터": [
-        "data center",
-        "data centre",
-        "데이터센터",
-    ],
-    "금리": [
-        "interest rate",
-        "interest rates",
-        "rate cut",
-        "rate hike",
-        "금리",
-    ],
-    "관세": [
-        "tariff",
-        "tariffs",
-        "관세",
-    ],
-    "수출규제": [
-        "export control",
-        "export controls",
-        "export restriction",
-        "수출규제",
-    ],
-    "실적": [
-        "earnings",
-        "revenue",
-        "profit",
-        "실적",
-    ],
-    "투자": [
-        "investment",
-        "invest",
-        "investing",
-        "투자",
-    ],
-}
 
-
-def extract_keywords(article):
-    title = article.get("title", "")
-    text = title.lower()
-
-    keywords = []
-
-    for keyword_group, keyword_list in KEYWORD_GROUPS.items():
-        for keyword in keyword_list:
-            if keyword.lower() in text:
-                keywords.append(keyword_group)
-                break
-
-    return keywords
 # ============================================================
 # 전체 감시 대상 뉴스 조회
 # ============================================================
 
-def collect_news(limit_per_query=5):
-    all_news = []
-
-    for speaker, query in NEWS_QUERIES.items():
-        print(f"🔎 {speaker} 검색 중...")
-
-        articles = get_google_news(
-            query=query,
-            limit=limit_per_query,
-        )
-
+def _collect_one_news_query(speaker, query, limit_per_query):
+    try:
+        articles = get_google_news(query=query, limit=limit_per_query)
         for article in articles:
             article["speaker"] = speaker
             article["related_symbols"] = find_related_symbols(article)
-            article["keywords"] = extract_keywords(article)
+        return articles
+    except Exception:
+        return []
 
-        all_news.extend(articles)
 
-    # 중복 제거 후 최신순 정렬
+def collect_news(limit_per_query=5):
+    """Google News RSS 병렬 수집 + 전체 실패 시 간단 검색 재시도."""
+    all_news = []
+    with ThreadPoolExecutor(max_workers=min(8, len(NEWS_QUERIES))) as pool:
+        futures = {pool.submit(_collect_one_news_query, speaker, query, limit_per_query): speaker for speaker, query in NEWS_QUERIES.items()}
+        for future in as_completed(futures):
+            try:
+                all_news.extend(future.result() or [])
+            except Exception:
+                pass
+
+    if not all_news:
+        fallback_queries = {"NVIDIA": "NVIDIA AI GPU", "AMD": "AMD AI semiconductor", "TSMC": "TSMC AI semiconductor"}
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {pool.submit(_collect_one_news_query, speaker, query, limit_per_query): speaker for speaker, query in fallback_queries.items()}
+            for future in as_completed(futures):
+                try:
+                    all_news.extend(future.result() or [])
+                except Exception:
+                    pass
+
     unique_news = remove_duplicate_news(all_news)
-    unique_news.sort(key=lambda x: x.get("published_at", ""), reverse=True)
-
+    unique_news.sort(key=lambda x: str(x.get("published_at", "")), reverse=True)
     return unique_news
 
 
@@ -292,6 +238,5 @@ if __name__ == "__main__":
         print(f"원천       : {article['source']}")
         print(f"시간       : {article['published_at']}")
         print(f"관련종목   : {', '.join(article['related_symbols']) or '없음'}")
-        print(f"핵심키워드 : {', '.join(article['keywords']) or '없음'}")
         print(f"제목       : {article['title']}")
         print(f"링크       : {article['link']}")
