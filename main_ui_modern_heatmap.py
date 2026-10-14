@@ -12,6 +12,8 @@ from market_indicators import get_market_indicators
 from data_manager import DataManager
 from news_collector import collect_news
 from market_heatmap import get_heatmap_data
+from sim_tab import SimulationTab
+from session_baseline import SessionBaseline, market_open_flags
 # ============================================================
 # 색상 테마
 # ============================================================
@@ -35,6 +37,10 @@ STATUS_BAR_BG = "#03150f"  # 하단 상태바 (그라데이션 최하단 톤과 
 GRADIENT_TOP = "#0f172a"     # slate-900 (네이비)
 GRADIENT_BOTTOM = "#064e3b"  # emerald-900 (그린)
 
+# 시뮬레이션 탭 등 별도 모듈에 넘겨줄 색상 모음
+THEME = dict(BG=BG, PANEL=PANEL, PANEL_2=PANEL_2, BORDER=BORDER, TEXT=TEXT, MUTED=MUTED,
+             RED=RED, BLUE=BLUE, WHITE=WHITE, DEEP_BG=DEEP_BG)
+
 
 class TradingApp:
 
@@ -55,7 +61,8 @@ class TradingApp:
         # 기본 데이터
         # ====================================================
 
-        self.previous_prices = {}
+        self.previous_prices = {}  # (누적 변화 방식으로 바뀌면서 더 이상 변화 계산에는 쓰지 않음)
+        self.baselines = SessionBaseline()  # 장 시작(시가) 기준가 - 누적 변화 계산용
         self.price_history = defaultdict(lambda: deque(maxlen=60))
         self.selected_symbol = None
         self.news_data = []
@@ -159,6 +166,10 @@ class TradingApp:
         main.add(monitor_tab, text="  📈 Market Monitor  ")
         main.add(heatmap_tab, text="  🔥 시총 Heatmap  ")
 
+        # 세 번째 탭 - SOXL/SOXS 50:50 익절 시뮬레이션
+        self.sim_tab = SimulationTab(main, THEME, status_callback=self._sim_status)
+        main.add(self.sim_tab, text="  🧪 SOXL/SOXS 시뮬레이션  ")
+
         # 기존 Market Monitor 화면
         # 왼쪽 68%, 오른쪽 32%
         left = tk.Frame(
@@ -241,8 +252,8 @@ class TradingApp:
             "symbol": "종목코드",
             "name": "종목명",
             "price": "현재가",
-            "change": "변화",
-            "change_rate": "변화율",
+            "change": "누적변화",
+            "change_rate": "누적변화율",
         }
 
         widths = {
@@ -250,7 +261,7 @@ class TradingApp:
             "name": 150,
             "price": 135,
             "change": 110,
-            "change_rate": 95,
+            "change_rate": 105,
         }
 
         for col in columns:
@@ -334,37 +345,57 @@ class TradingApp:
             "USD/KRW",
         ]
 
-        for name in market_names:
-            row = tk.Frame(
+        # 2열 시장지표 배치
+        for i, name in enumerate(market_names):
+            row = i // 2
+            col = i % 2
+
+            cell = tk.Frame(
                 market_frame,
                 bg=PANEL_2,
                 highlightbackground=BORDER,
                 highlightthickness=1,
             )
-            row.pack(fill="x", pady=3)
+
+            cell.grid(
+                row=row,
+                column=col,
+                sticky="ew",
+                padx=2,
+                pady=2,
+            )
 
             name_label = tk.Label(
-                row,
+                cell,
                 text=name,
                 font=("Arial", 10, "bold"),
                 fg=TEXT,
                 bg=PANEL_2,
-                width=11,
+                width=9,
                 anchor="w",
             )
-            name_label.pack(side="left", padx=12, pady=8)
+            name_label.pack(side="left", padx=(10, 4), pady=8)
 
             value_label = tk.Label(
-                row,
+                cell,
                 text="데이터 확인 중...",
                 font=("Consolas", 10),
                 fg=MUTED,
                 bg=PANEL_2,
                 anchor="e",
             )
-            value_label.pack(side="right", padx=12, pady=8)
+            value_label.pack(
+                side="right",
+                padx=(4, 10),
+                pady=8,
+                expand=True,
+            )
 
             self.market_labels[name] = value_label
+
+        # 두 열을 동일한 폭으로
+        market_frame.grid_columnconfigure(0, weight=1)
+        market_frame.grid_columnconfigure(1, weight=1)
 
         tk.Label(
             right,
@@ -576,8 +607,7 @@ class TradingApp:
             lambda e: self.heatmap_canvas.itemconfigure(self.heatmap_window, width=e.width)
         )
         self.heatmap_canvas.bind_all("<MouseWheel>", self._on_heatmap_mousewheel, add="+")
-        self.heatmap_content.bind("<Configure>", lambda e: self._draw_heatmap())
-
+        
         self.heatmap_cards = {}
         self.root.after(300, lambda: threading.Thread(target=self._load_heatmap_async, daemon=True).start())
 
@@ -1021,6 +1051,15 @@ class TradingApp:
         symbols = list(STOCKS.keys())
         stock_data = get_stock_prices(self.access_token, symbols)
 
+        # 장 시작(시가) 기준가 확보 - 대부분은 네트워크를 쓰지 않고 바로 지나갑니다.
+        if stock_data:
+            try:
+                parsed = parse_stock_data(stock_data)
+                kr_open, us_open = market_open_flags()
+                self.baselines.ensure({s.symbol: s.price for s in parsed}, kr_open, us_open)
+            except Exception as e:
+                print("⚠️ 장 시작 기준가 갱신 실패:", e)
+
         self.root.after(
             0,
             self.render_stock_prices,
@@ -1080,20 +1119,30 @@ class TradingApp:
 
         self.draw_chart()
 
+        # 시뮬레이션 탭에 최신 시세 전달 (오류가 나도 주가 화면은 영향받지 않도록 분리)
+        try:
+            self.sim_tab.update_prices({s.symbol: s.price for s in stocks})
+        except Exception as e:
+            print("❌ 시뮬레이션 갱신 오류:", e)
+
+    def _sim_status(self, message):
+        self.status_label.config(text=f"🧪 {message}  •  {time.strftime('%H:%M:%S')}")
+
     def get_flag_image(self, currency):
         if currency == "KRW":
             return self.flag_kr_open if self.kr_open else self.flag_kr_closed
         return self.flag_us_open if self.us_open else self.flag_us_closed
 
     def insert_stock_row(self, stock):
-        previous_price = self.previous_prices.get(stock.symbol)
+        # 직전 조회가 아니라 '장 시작(시가) 대비' 누적 변화
+        base_price = self.baselines.get(stock.symbol)
 
-        if previous_price is None:
+        if not base_price:
             change = 0
             change_rate = 0
         else:
-            change = stock.price - previous_price
-            change_rate = (change / previous_price) * 100 if previous_price else 0
+            change = stock.price - base_price
+            change_rate = (change / base_price) * 100
 
         self.price_history[stock.symbol].append(stock.price)
 
@@ -1122,14 +1171,9 @@ class TradingApp:
             self.tree.selection_set(item)
             self.tree.focus(item)
 
-        self.previous_prices[stock.symbol] = stock.price
 
     def update_market_status_labels(self):
-        now_kr = datetime.now(ZoneInfo("Asia/Seoul"))
-        self.kr_open = now_kr.weekday() < 5 and dt_time(9, 0) <= now_kr.time() < dt_time(15, 30)
-
-        now_us = datetime.now(ZoneInfo("America/New_York"))
-        self.us_open = now_us.weekday() < 5 and dt_time(9, 30) <= now_us.time() < dt_time(16, 0)
+        self.kr_open, self.us_open = market_open_flags()
 
         if self.kr_open:
             self.kr_status_label.config(text="🇰🇷 한국주식  •  Market Open", fg=RED)

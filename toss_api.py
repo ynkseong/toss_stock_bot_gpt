@@ -35,6 +35,8 @@ STOCKS = {
     "AMAT": "Applied Materials",
     "TSLA": "Tesla",
     "AVGO": "Broadcom",
+    "SOXL": "Directional Daily Semiconductor Bull 3X",
+    "SOXS": "Directional Daily Semiconductor Bear 3X"
     }
 
 # ==========================================
