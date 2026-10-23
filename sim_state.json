@@ -1,54 +1,120 @@
 {
   "started": true,
-  "started_at": "2026-10-14 23:38:25",
-  "initial_cash": 1000.0,
-  "take_profit_pct": 5.0,
+  "started_at": "2026-10-21 23:29:59",
+  "initial_cash": 40000.0,
+  "take_profit_pct": 2.0,
   "reinvest": true,
-  "realized_pnl": 24.59880000000004,
+  "rebuy_delay_sec": 120,
+  "max_trades_per_hour": 10,
+  "sell_fee": 1.0,
+  "realized_pnl": 405.7325000000019,
+  "total_fees": 2.0,
   "slots": {
     "SOXL": {
-      "cash": 29.060000000000002,
-      "shares": 4,
-      "avg": 117.735
+      "cash": 3.960000000000946,
+      "shares": 99,
+      "avg": 102.99,
+      "rebuy_at": null
     },
     "SOXS": {
-      "cash": 15.67999999999995,
-      "shares": 12,
-      "avg": 42.4099
+      "cash": 31.11999999999898,
+      "shares": 219,
+      "avg": 45.52,
+      "rebuy_at": null
+    },
+    "TQQQ": {
+      "cash": 58.76250000000073,
+      "shares": 139,
+      "avg": 73.0,
+      "rebuy_at": null
+    },
+    "SQQQ": {
+      "cash": 1.8999999999996362,
+      "shares": 270,
+      "avg": 37.03,
+      "rebuy_at": null
     }
   },
   "trades": [
     {
-      "time": "2026-10-14 23:38:25",
+      "ts": 1792592999.2673883,
+      "time": "2026-10-21 23:29:59",
       "symbol": "SOXL",
       "side": "BUY",
-      "shares": 4,
-      "price": 117.735,
-      "pnl": null
+      "shares": 99,
+      "price": 100.96,
+      "pnl": null,
+      "fee": 0.0
     },
     {
-      "time": "2026-10-14 23:38:25",
+      "ts": 1792592999.2673883,
+      "time": "2026-10-21 23:29:59",
       "symbol": "SOXS",
       "side": "BUY",
-      "shares": 12,
-      "price": 40.36,
-      "pnl": null
+      "shares": 219,
+      "price": 45.52,
+      "pnl": null,
+      "fee": 0.0
     },
     {
-      "time": "2026-10-15 01:31:50",
-      "symbol": "SOXS",
+      "ts": 1792592999.2673883,
+      "time": "2026-10-21 23:29:59",
+      "symbol": "TQQQ",
+      "side": "BUY",
+      "shares": 139,
+      "price": 71.6,
+      "pnl": null,
+      "fee": 0.0
+    },
+    {
+      "ts": 1792592999.2673883,
+      "time": "2026-10-21 23:29:59",
+      "symbol": "SQQQ",
+      "side": "BUY",
+      "shares": 270,
+      "price": 37.03,
+      "pnl": null,
+      "fee": 0.0
+    },
+    {
+      "ts": 1792597009.5862243,
+      "time": "2026-10-22 00:36:49",
+      "symbol": "SOXL",
       "side": "SELL",
-      "shares": 12,
-      "price": 42.4099,
-      "pnl": 24.59880000000004
+      "shares": 99,
+      "price": 102.99,
+      "pnl": 199.97000000000116,
+      "fee": 1.0
     },
     {
-      "time": "2026-10-15 01:31:50",
-      "symbol": "SOXS",
+      "ts": 1792597131.2773368,
+      "time": "2026-10-22 00:38:51",
+      "symbol": "SOXL",
       "side": "BUY",
-      "shares": 12,
-      "price": 42.4099,
-      "pnl": null
+      "shares": 99,
+      "price": 102.99,
+      "pnl": null,
+      "fee": 0.0
+    },
+    {
+      "ts": 1792600782.3602936,
+      "time": "2026-10-22 01:39:42",
+      "symbol": "TQQQ",
+      "side": "SELL",
+      "shares": 139,
+      "price": 73.0875,
+      "pnl": 205.76250000000073,
+      "fee": 1.0
+    },
+    {
+      "ts": 1792600903.9801428,
+      "time": "2026-10-22 01:41:43",
+      "symbol": "TQQQ",
+      "side": "BUY",
+      "shares": 139,
+      "price": 73.0,
+      "pnl": null,
+      "fee": 0.0
     }
   ]
 }

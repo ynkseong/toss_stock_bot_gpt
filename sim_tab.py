@@ -1,5 +1,5 @@
 """
-SOXL / SOXS 시뮬레이션 탭 (Tkinter)
+SOXL / SOXS / TQQQ / SQQQ 시뮬레이션 탭 (Tkinter)
 메인 화면의 ttk.Notebook에 탭으로 추가되며, 실시간 시세는 update_prices()로 전달받습니다.
 """
 
@@ -7,7 +7,7 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from sim_engine import SoxSimulator, SYMBOLS
+from sim_engine import SoxSimulator, SYMBOLS, REBUY_DELAY_SEC, MAX_TRADES_PER_HOUR, SELL_FEE
 
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sim_state.json")
 
@@ -44,21 +44,22 @@ class SimulationTab(tk.Frame):
         cfg.pack(fill="x", pady=(0, 10))
 
         tk.Label(
-            cfg, text="  🧪 SOXL / SOXS 50:50 익절 시뮬레이션",
+            cfg, text="  🧪 SOXL · SOXS · TQQQ · SQQQ 균등 익절 시뮬레이션",
             font=("Arial", 13, "bold"), fg=t["TEXT"], bg=t["PANEL"], anchor="w",
         ).pack(fill="x", padx=10, pady=(12, 2))
 
         tk.Label(
             cfg,
-            text="가상 자금을 SOXL·SOXS에 절반씩 매수 → 평균단가 대비 목표 수익률에 도달한 종목만 전량 매도 "
-                 "(실시간 시세 기반 · 실제 주문 없음)",
+            text=f"가상 자금을 4종목에 균등 배분해 최대한 매수 → 평균단가 대비 목표 수익률에 도달한 종목만 전량 매도 → "
+                 f"{REBUY_DELAY_SEC // 60}분 뒤 재매수  •  1시간 최대 {MAX_TRADES_PER_HOUR}회(매수+매도)  •  "
+                 f"수수료 매도 시 ${SELL_FEE:g} 고정  (실시간 시세 기반 · 실제 주문 없음)",
             font=("Arial", 9), fg=t["MUTED"], bg=t["PANEL"], anchor="w",
         ).pack(fill="x", padx=12, pady=(0, 8))
 
         row = tk.Frame(cfg, bg=t["PANEL"])
         row.pack(fill="x", padx=12, pady=(0, 12))
 
-        self.capital_var = tk.StringVar(value="1000")
+        self.capital_var = tk.StringVar(value="40000")
         self.target_var = tk.StringVar(value="5")
         self.reinvest_var = tk.BooleanVar(value=True)
 
@@ -73,7 +74,7 @@ class SimulationTab(tk.Frame):
         self.target_entry.pack(side="left", padx=(6, 18))
 
         self.reinvest_check = tk.Checkbutton(
-            row, text="익절 후 같은 종목 재매수", variable=self.reinvest_var,
+            row, text=f"익절 후 {REBUY_DELAY_SEC // 60}분 뒤 재매수", variable=self.reinvest_var,
             fg=t["TEXT"], bg=t["PANEL"], selectcolor=t["DEEP_BG"],
             activebackground=t["PANEL"], activeforeground=t["TEXT"], font=("Arial", 10),
         )
@@ -105,7 +106,8 @@ class SimulationTab(tk.Frame):
         self.equity_value = self._card(cards, "총 자산")
         self.return_value = self._card(cards, "총 수익률")
         self.cash_value = self._card(cards, "현금")
-        self.realized_value = self._card(cards, "실현 손익")
+        self.realized_value = self._card(cards, "실현 손익 (수수료 반영)")
+        self.limit_value = self._card(cards, "최근 1시간 거래")
 
         # ---------- 보유 현황 ----------
         tk.Label(self, text="  보유 현황", font=("Arial", 12, "bold"),
@@ -116,17 +118,17 @@ class SimulationTab(tk.Frame):
             "symbol": "종목", "shares": "수량", "avg": "평균단가", "price": "현재가",
             "pnl": "평가손익률", "target": "익절 목표가", "value": "평가금액",
         }
-        self.pos_tree = self._tree(self, pos_cols, pos_heads, height=3)
+        self.pos_tree = self._tree(self, pos_cols, pos_heads, height=4)
         self.pos_tree.pack(fill="x")
 
         # ---------- 체결 내역 ----------
         tk.Label(self, text="  체결 내역 (최신순)", font=("Arial", 12, "bold"),
                  fg=t["TEXT"], bg=t["BG"], anchor="w").pack(fill="x", pady=(12, 4))
 
-        trade_cols = ("time", "symbol", "side", "shares", "price", "pnl")
+        trade_cols = ("time", "symbol", "side", "shares", "price", "fee", "pnl")
         trade_heads = {
             "time": "시간", "symbol": "종목", "side": "구분",
-            "shares": "수량", "price": "체결가", "pnl": "실현손익",
+            "shares": "수량", "price": "체결가", "fee": "수수료", "pnl": "실현손익",
         }
         wrap = tk.Frame(self, bg=t["BG"])
         wrap.pack(fill="both", expand=True)
@@ -192,7 +194,7 @@ class SimulationTab(tk.Frame):
     # ========================================================
 
     def update_prices(self, prices):
-        """prices: {"SOXL": 52.3, "SOXS": 18.1, ...} - 필요한 종목만 사용합니다."""
+        """prices: {"SOXL": 52.3, "TQQQ": 80.1, ...} - 필요한 종목만 사용합니다."""
         for sym in SYMBOLS:
             if sym in prices:
                 self.prices[sym] = float(prices[sym])
@@ -215,6 +217,16 @@ class SimulationTab(tk.Frame):
     # 화면 갱신
     # ========================================================
 
+    @staticmethod
+    def _flat_text(p, snap):
+        """보유 수량이 0일 때 표시할 문구"""
+        if not snap["reinvest"]:
+            return "0 (현금 대기)"
+        if p["rebuy_in"] is None:
+            return "0 (매수 대기)"
+        m, s = divmod(p["rebuy_in"], 60)
+        return f"0 (재매수 {m:02d}:{s:02d} 후)" if p["rebuy_in"] > 0 else "0 (재매수 대기)"
+
     def _refresh(self):
         t = self.t
         snap = self.sim.snapshot(self.prices)
@@ -233,7 +245,7 @@ class SimulationTab(tk.Frame):
                 fg=t["TEXT"],
             )
         else:
-            self.state_label.config(text="대기 중  •  시작 버튼을 눌러 현재가로 50:50 매수", fg=t["MUTED"])
+            self.state_label.config(text="대기 중  •  시작 버튼을 눌러 현재가로 4종목 균등 매수", fg=t["MUTED"])
 
         # 요약 카드
         self.equity_value.config(text=_money(snap["equity"]))
@@ -248,6 +260,12 @@ class SimulationTab(tk.Frame):
         self.realized_value.config(
             text=_signed_money(rp) if snap["started"] else "-",
             fg=t["RED"] if rp > 0 else (t["BLUE"] if rp < 0 else t["TEXT"]),
+        )
+
+        used, limit = snap["trades_last_hour"], snap["max_trades_per_hour"]
+        self.limit_value.config(
+            text=f"{used} / {limit}" if snap["started"] else "-",
+            fg=t["RED"] if (snap["started"] and used >= limit) else t["TEXT"],
         )
 
         # 보유 현황
@@ -265,7 +283,7 @@ class SimulationTab(tk.Frame):
                 tag = ("up",) if pnl > 0 else (("down",) if pnl < 0 else ())
             self.pos_tree.insert("", "end", tags=tag, values=(
                 p["symbol"],
-                f"{p['shares']:,}" if held else "0 (현금 대기)",
+                f"{p['shares']:,}" if held else self._flat_text(p, snap),
                 _money(p["avg"]) if held else "-",
                 _money(p["price"]) if p["price"] else "-",
                 f"{pnl:+.2f}%" if pnl is not None else "-",
@@ -285,5 +303,6 @@ class SimulationTab(tk.Frame):
                 tr["time"], tr["symbol"],
                 "매수" if tr["side"] == "BUY" else "매도",
                 f"{tr['shares']:,}", _money(tr["price"]),
+                _money(tr["fee"]) if tr.get("fee") else "-",
                 _signed_money(pnl) if pnl is not None else "-",
             ))

@@ -1,0 +1,54 @@
+{
+  "started": true,
+  "started_at": "2026-10-14 23:38:25",
+  "initial_cash": 1000.0,
+  "take_profit_pct": 5.0,
+  "reinvest": true,
+  "realized_pnl": 24.59880000000004,
+  "slots": {
+    "SOXL": {
+      "cash": 29.060000000000002,
+      "shares": 4,
+      "avg": 117.735
+    },
+    "SOXS": {
+      "cash": 15.67999999999995,
+      "shares": 12,
+      "avg": 42.4099
+    }
+  },
+  "trades": [
+    {
+      "time": "2026-10-14 23:38:25",
+      "symbol": "SOXL",
+      "side": "BUY",
+      "shares": 4,
+      "price": 117.735,
+      "pnl": null
+    },
+    {
+      "time": "2026-10-14 23:38:25",
+      "symbol": "SOXS",
+      "side": "BUY",
+      "shares": 12,
+      "price": 40.36,
+      "pnl": null
+    },
+    {
+      "time": "2026-10-15 01:31:50",
+      "symbol": "SOXS",
+      "side": "SELL",
+      "shares": 12,
+      "price": 42.4099,
+      "pnl": 24.59880000000004
+    },
+    {
+      "time": "2026-10-15 01:31:50",
+      "symbol": "SOXS",
+      "side": "BUY",
+      "shares": 12,
+      "price": 42.4099,
+      "pnl": null
+    }
+  ]
+}

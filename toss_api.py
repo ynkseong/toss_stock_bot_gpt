@@ -36,7 +36,9 @@ STOCKS = {
     "TSLA": "Tesla",
     "AVGO": "Broadcom",
     "SOXL": "Directional Daily Semiconductor Bull 3X",
-    "SOXS": "Directional Daily Semiconductor Bear 3X"
+    "SOXS": "Directional Daily Semiconductor Bear 3X",
+    "TQQQ": "ProShares UltraPro QQQ (Nasdaq-100 Bull 3X)",
+    "SQQQ": "ProShares UltraPro Short QQQ (Nasdaq-100 Bear 3X)"
     }
 
 # ==========================================

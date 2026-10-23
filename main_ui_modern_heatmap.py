@@ -13,6 +13,7 @@ from data_manager import DataManager
 from news_collector import collect_news
 from market_heatmap import get_heatmap_data
 from sim_tab import SimulationTab
+from ant_mascot import AntMascot
 from session_baseline import SessionBaseline, market_open_flags
 # ============================================================
 # 색상 테마
@@ -116,6 +117,10 @@ class TradingApp:
             bg=BG,
         ).pack(anchor="w", pady=(3, 0))
 
+        # 마스코트 - 빨강/파랑 더듬이 개미 (클릭하면 한마디, 익절/매수 때도 반응)
+        self.ant = AntMascot(header, bg=BG)
+        self.ant.pack(side="left", padx=(18, 0))
+
         # 상단 버튼
         button_frame = tk.Frame(header, bg=BG)
         button_frame.pack(side="right")
@@ -166,9 +171,9 @@ class TradingApp:
         main.add(monitor_tab, text="  📈 Market Monitor  ")
         main.add(heatmap_tab, text="  🔥 시총 Heatmap  ")
 
-        # 세 번째 탭 - SOXL/SOXS 50:50 익절 시뮬레이션
+        # 세 번째 탭 - SOXL/SOXS/TQQQ/SQQQ 균등 익절 시뮬레이션
         self.sim_tab = SimulationTab(main, THEME, status_callback=self._sim_status)
-        main.add(self.sim_tab, text="  🧪 SOXL/SOXS 시뮬레이션  ")
+        main.add(self.sim_tab, text="  🧪 시뮬레이션  ")
 
         # 기존 Market Monitor 화면
         # 왼쪽 68%, 오른쪽 32%
@@ -1127,6 +1132,12 @@ class TradingApp:
 
     def _sim_status(self, message):
         self.status_label.config(text=f"🧪 {message}  •  {time.strftime('%H:%M:%S')}")
+
+        # 개미가 시뮬레이션 체결에 반응
+        if " SELL " in message:
+            self.ant.say("익절 성공! 냠냠~")
+        elif " BUY " in message:
+            self.ant.say("줍줍! 샀다!")
 
     def get_flag_image(self, currency):
         if currency == "KRW":
